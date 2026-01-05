@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="128" height="128" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Background gradient -->
+  <defs>
+    <linearGradient id="grad128" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#4F46E5;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#7C3AED;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+
+  <!-- Background circle -->
+  <circle cx="64" cy="64" r="64" fill="url(#grad128)"/>
+
+  <!-- Left peer node -->
+  <circle cx="32" cy="64" r="19" stroke="white" stroke-width="4" fill="none"/>
+
+  <!-- Right peer node -->
+  <circle cx="96" cy="64" r="19" stroke="white" stroke-width="4" fill="none"/>
+
+  <!-- Connection line -->
+  <line x1="51" y1="64" x2="77" y2="64" stroke="white" stroke-width="4" stroke-linecap="round"/>
+
+  <!-- Connection arrows -->
+  <path d="M 70 45 L 51 64" stroke="white" stroke-width="4" stroke-linecap="round"/>
+  <path d="M 58 83 L 77 64" stroke="white" stroke-width="4" stroke-linecap="round"/>
+
+  <!-- Sync arrows around nodes -->
+  <path d="M 18.700000000000003 39.3 L 7.300000000000001 50.7" stroke="white" stroke-width="4" stroke-linecap="round"/>
+  <path d="M 18.700000000000003 88.7 L 7.300000000000001 77.3" stroke="white" stroke-width="4" stroke-linecap="round"/>
+
+  <path d="M 109.3 39.3 L 120.7 50.7" stroke="white" stroke-width="4" stroke-linecap="round"/>
+  <path d="M 109.3 88.7 L 120.7 77.3" stroke="white" stroke-width="4" stroke-linecap="round"/>
+</svg>

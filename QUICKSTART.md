@@ -6,27 +6,28 @@ Get up and running in 5 minutes! 🚀
 
 ## ⚡ Quick Setup
 
-### 1. Build the Extension (1 minute)
+### 1. Clone the Repository (1 minute)
 
 ```bash
+git clone https://github.com/YOUR-USERNAME/SynchroPeer.git
 cd SynchroPeer
-npm install
-npm run build
 ```
+
+**No build required!** The extension is pre-built and ready to use.
 
 ### 2. Load in Chrome (30 seconds)
 
 1. Open Chrome → `chrome://extensions/`
 2. Enable **Developer mode** (top-right toggle)
 3. Click **Load unpacked**
-4. Select `SynchroPeer/dist/chrome` folder
+4. Select the `chrome/` folder from the repository
 5. Pin extension to toolbar
 
 ### 3. Load in Firefox (30 seconds)
 
 1. Open Firefox → `about:debugging#/runtime/this-firefox`
 2. Click **Load Temporary Add-on...**
-3. Navigate to `SynchroPeer/dist/firefox` and select `manifest.json`
+3. Navigate to the `firefox/` folder and select `manifest.json`
 
 ---
 

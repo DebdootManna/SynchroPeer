@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SynchroPeer</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="container">
+    <!-- Header -->
+    <header class="header">
+      <div class="logo">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <circle cx="8" cy="12" r="3" stroke="currentColor" stroke-width="2" fill="none"/>
+          <circle cx="16" cy="12" r="3" stroke="currentColor" stroke-width="2" fill="none"/>
+          <path d="M11 12h2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+          <path d="M8 9L6 7M16 9l2-2M8 15l-2 2M16 15l2 2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+        </svg>
+        <h1>SynchroPeer</h1>
+      </div>
+      <div class="status-indicator">
+        <div class="status-dot" id="statusDot"></div>
+        <span class="status-text" id="statusText">Disconnected</span>
+      </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="main-content">
+      <!-- Connection Setup Section -->
+      <section class="section" id="setupSection">
+        <h2 class="section-title">Setup P2P Connection</h2>
+
+        <div class="info-box">
+          <svg class="info-icon" width="16" height="16" viewBox="0 0 16 16" fill="none">
+            <circle cx="8" cy="8" r="7" stroke="currentColor" stroke-width="1.5"/>
+            <path d="M8 7v4M8 5h.01" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+          </svg>
+          <p class="info-text">Enter the same passphrase on both devices. First device listens, second connects.</p>
+        </div>
+
+        <div class="form-group">
+          <label for="passphrase">Secret Passphrase</label>
+          <input
+            type="password"
+            id="passphrase"
+            placeholder="Enter a strong passphrase"
+            autocomplete="off"
+          >
+          <div class="input-hint">Used to encrypt all data and establish P2P connection</div>
+        </div>
+
+        <div class="form-group">
+          <label>Connection Role</label>
+          <div class="radio-group">
+            <label class="radio-label">
+              <input type="radio" name="role" value="primary" id="rolePrimary" checked>
+              <span class="radio-custom"></span>
+              <span class="radio-text">
+                <strong>Primary</strong>
+                <small></small>First device (listens for connection)</small>
+              </span>
+            </label>
+            <label class="radio-label">
+              <input type="radio" name="role" value="secondary" id="roleSecondary">
+              <span class="radio-custom"></span>
+              <span class="radio-text">
+                <strong>Secondary</strong>
+                <small>Second device (initiates connection)</small>
+              </span>
+            </label>
+          </div>
+        </div>
+
+        <button class="btn btn-primary" id="connectBtn">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+            <path d="M6 10l-2 2m0 0l-2-2m2 2V8m8-2l-2-2m0 0l-2 2m2-2v4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+          </svg>
+          Start Connection
+        </button>
+      </section>
+
+      <!-- Connected Section -->
+      <section class="section hidden" id="connectedSection">
+        <h2 class="section-title">Connection Active</h2>
+
+        <div class="connection-info">
+          <div class="connection-card">
+            <div class="card-icon" id="roleIcon">
+              <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+                <circle cx="10" cy="10" r="8" stroke="currentColor" stroke-width="2"/>
+              </svg>
+            </div>
+            <div class="card-content">
+              <div class="card-label">Role</div>
+              <div class="card-value" id="roleValue">Primary</div>
+            </div>
+          </div>
+
+          <div class="connection-card">
+            <div class="card-icon">
+              <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+                <path d="M3 10h14M10 3v14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+              </svg>
+            </div>
+            <div class="card-content">
+              <div class="card-label">Last Sync</div>
+              <div class="card-value" id="lastSyncValue">Never</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Sync Stats -->
+        <div class="stats-grid">
+          <div class="stat-card">
+            <div class="stat-value" id="bookmarksSynced">0</div>
+            <div class="stat-label">Bookmarks Synced</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-value" id="historySynced">0</div>
+            <div class="stat-label">History Synced</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-value" id="syncCount">0</div>
+            <div class="stat-label">Total Syncs</div>
+          </div>
+        </div>
+
+        <!-- Sync Controls -->
+        <div class="button-group">
+          <button class="btn btn-primary" id="syncNowBtn">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+              <path d="M14 8a6 6 0 11-12 0 6 6 0 0112 0z" stroke="currentColor" stroke-width="1.5"/>
+              <path d="M8 4v4l2 2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+            </svg>
+            Sync Now
+          </button>
+          <button class="btn btn-secondary" id="disconnectBtn">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+              <path d="M4 12L12 4M4 4l8 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+            </svg>
+            Disconnect
+          </button>
+        </div>
+
+        <!-- Status Messages -->
+        <div class="status-message hidden" id="statusMessage"></div>
+      </section>
+
+      <!-- Loading Section -->
+      <section class="section hidden" id="loadingSection">
+        <div class="loading-container">
+          <div class="spinner"></div>
+          <p class="loading-text" id="loadingText">Connecting...</p>
+        </div>
+      </section>
+    </main>
+
+    <!-- Footer -->
+    <footer class="footer">
+      <div class="footer-content">
+        <span class="footer-text">🔒 End-to-End Encrypted • No Cloud • Pure P2P</span>
+      </div>
+    </footer>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

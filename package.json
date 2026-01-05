@@ -8,9 +8,9 @@
     "build:chrome": "node build.js chrome",
     "build:firefox": "node build.js firefox",
     "watch": "node build.js --watch",
-    "package:chrome": "cd dist/chrome && zip -r ../synchropeer-chrome.zip .",
-    "package:firefox": "cd dist/firefox && zip -r ../synchropeer-firefox.zip .",
-    "clean": "rm -rf dist"
+    "package:chrome": "cd chrome && zip -r ../synchropeer-chrome.zip .",
+    "package:firefox": "cd firefox && zip -r ../synchropeer-firefox.zip .",
+    "clean": "rm -rf chrome firefox dist"
   },
   "keywords": [
     "browser-extension",

@@ -6,6 +6,27 @@ No Cloud • No Server • Just You • End-to-End Encrypted
 
 ---
 
+## ⚡ Quick Start (Just Cloned from GitHub?)
+
+**No build required!** The extension is ready to use:
+
+### Chrome / Edge / Brave / Arc
+1. Open `chrome://extensions/`
+2. Enable "Developer mode" (top-right toggle)
+3. Click "Load unpacked"
+4. Select the **`chrome/`** folder from this repository
+5. Done! 🎉
+
+### Firefox
+1. Open `about:debugging#/runtime/this-firefox`
+2. Click "Load Temporary Add-on..."
+3. Select **`firefox/manifest.json`** from this repository
+4. Done! 🎉
+
+**Now jump to [Testing & Usage](#-developer-test-guide) to connect and sync!**
+
+---
+
 ## 🚀 Overview
 
 SynchroPeer is a cross-browser extension that synchronizes your browsing history and bookmarks between any two browsers using a pure peer-to-peer (P2P) architecture. No cloud storage, no servers, no tracking—just direct, encrypted communication between your devices.
@@ -78,31 +99,44 @@ SynchroPeer is a cross-browser extension that synchronizes your browsing history
 - npm or yarn
 - Chrome 88+ / Firefox 91+ / Edge 88+
 
-### Building from Source
+### Quick Start (No Build Required!)
+
+**For most users, you don't need to build anything!** Just clone and load:
 
 1. **Clone the repository**:
    ```bash
+   git clone https://github.com/DebdootManna/SynchroPeer.git
    cd SynchroPeer
    ```
 
-2. **Install dependencies**:
+2. **Load in Chrome**:
+   - Open `chrome://extensions/`
+   - Enable "Developer mode"
+   - Click "Load unpacked"
+   - Select the `chrome/` folder
+
+3. **Load in Firefox**:
+   - Open `about:debugging#/runtime/this-firefox`
+   - Click "Load Temporary Add-on..."
+   - Select `firefox/manifest.json`
+
+### Building from Source (Optional)
+
+Only needed if you want to modify the code:
+
+1. **Install dependencies**:
    ```bash
    npm install
    ```
 
-3. **Build the extension**:
+2. **Build the extension**:
    ```bash
-   # Build for both Chrome and Firefox
    npm run build
-
-   # Or build for specific browser
-   npm run build:chrome
-   npm run build:firefox
    ```
 
-4. **Output**:
-   - Chrome version: `dist/chrome/`
-   - Firefox version: `dist/firefox/`
+3. **Output**:
+   - Chrome version: `chrome/`
+   - Firefox version: `firefox/`
 
 ---
 
@@ -110,29 +144,28 @@ SynchroPeer is a cross-browser extension that synchronizes your browsing history
 
 ### Testing Between Chrome and Firefox on Mac
 
-#### Step 1: Build the Extension
+#### Step 1: Load in Chrome
 
-```bash
-npm install
-npm run build
-```
+1. Clone the repository:
+   ```bash
+   git clone https://github.com/YOUR-USERNAME/SynchroPeer.git
+   cd SynchroPeer
+   ```
 
-#### Step 2: Load in Chrome
+2. Open Chrome and navigate to `chrome://extensions/`
+3. Enable **Developer mode** (toggle in top-right)
+4. Click **Load unpacked**
+5. Select the `chrome/` folder from the repository
+6. The SynchroPeer extension should appear in your toolbar
 
-1. Open Chrome and navigate to `chrome://extensions/`
-2. Enable **Developer mode** (toggle in top-right)
-3. Click **Load unpacked**
-4. Select the `dist/chrome` folder
-5. The SynchroPeer extension should appear in your toolbar
-
-#### Step 3: Load in Firefox
+#### Step 2: Load in Firefox
 
 1. Open Firefox and navigate to `about:debugging#/runtime/this-firefox`
 2. Click **Load Temporary Add-on...**
-3. Navigate to `dist/firefox/` and select `manifest.json`
+3. Navigate to the repository's `firefox/` folder and select `manifest.json`
 4. The extension will load temporarily (until Firefox restarts)
 
-#### Step 4: Establish Connection
+#### Step 3: Establish Connection
 
 **On Chrome (Primary Device)**:
 1. Click the SynchroPeer extension icon
@@ -148,14 +181,14 @@ npm run build
 4. Click **Start Connection**
 5. Status should change to "Connecting..." then "Connected"
 
-#### Step 5: Test Synchronization
+#### Step 4: Test Synchronization
 
 1. Once connected, click **Sync Now** on either device
 2. Wait for sync to complete (status message will appear)
 3. Check your bookmarks and history on both browsers
 4. Verify that data has been synchronized
 
-#### Step 6: Verify Encryption
+#### Step 5: Verify Encryption
 
 1. Open browser console (F12)
 2. Look for `[Background]` log messages
@@ -265,9 +298,25 @@ npm run build
 
 ```
 SynchroPeer/
-├── src/
+├── chrome/                          # 👈 Chrome extension (ready to load!)
+│   ├── manifest.json               # Chrome Manifest V3
+│   ├── background.js               # Main background service worker
+│   ├── popup.html/css/js           # UI files
+│   ├── utils/                      # Crypto, sync, P2P modules
+│   ├── lib/                        # PeerJS library
+│   └── icons/                      # Extension icons
+│
+├── firefox/                         # 👈 Firefox extension (ready to load!)
+│   ├── manifest.json               # Firefox Manifest V2
+│   ├── background.js               # Main background script
+│   ├── popup.html/css/js           # UI files
+│   ├── utils/                      # Crypto, sync, P2P modules
+│   ├── lib/                        # PeerJS + browser-polyfill
+│   └── icons/                      # Extension icons
+│
+├── src/                             # Source code (for development)
 │   ├── background/
-│   │   └── background.js          # Main background service worker
+│   │   └── background.js           # Main orchestrator
 │   ├── popup/
 │   │   ├── popup.html              # Popup UI
 │   │   ├── popup.css               # Popup styles
@@ -276,16 +325,20 @@ SynchroPeer/
 │       ├── crypto.js               # Encryption utilities
 │       ├── sync-logic.js           # Sync algorithms
 │       └── p2p-manager.js          # P2P connection manager
-├── icons/                           # Extension icons
-├── dist/                            # Build output (generated)
-│   ├── chrome/                     # Chrome build
-│   └── firefox/                    # Firefox build
-├── manifest.chrome.json            # Chrome Manifest V3
-├── manifest.firefox.json           # Firefox Manifest V2
-├── build.js                        # Build script
+│
+├── icons/                           # Source icons
+├── manifest.chrome.json            # Chrome manifest template
+├── manifest.firefox.json           # Firefox manifest template
+├── build.js                        # Build script (outputs to chrome/ and firefox/)
 ├── package.json                    # Dependencies
-└── README.md                       # This file
+├── README.md                       # This file
+├── QUICKSTART.md                   # 5-minute setup guide
+├── TESTING_GUIDE.md                # Comprehensive testing
+├── ARCHITECTURE.md                 # Technical documentation
+└── ... (more docs)
 ```
+
+**Note**: The `chrome/` and `firefox/` folders contain ready-to-use extensions. Just load them directly in your browser - no build step required!
 
 ---
 
