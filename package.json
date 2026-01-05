@@ -1,0 +1,32 @@
+{
+  "name": "synchropeer",
+  "version": "1.0.0",
+  "description": "Pure P2P Browser Extension for synchronizing Bookmarks and History across browsers",
+  "main": "index.js",
+  "scripts": {
+    "build": "node build.js",
+    "build:chrome": "node build.js chrome",
+    "build:firefox": "node build.js firefox",
+    "watch": "node build.js --watch",
+    "package:chrome": "cd dist/chrome && zip -r ../synchropeer-chrome.zip .",
+    "package:firefox": "cd dist/firefox && zip -r ../synchropeer-firefox.zip .",
+    "clean": "rm -rf dist"
+  },
+  "keywords": [
+    "browser-extension",
+    "p2p",
+    "webrtc",
+    "sync",
+    "bookmarks",
+    "history"
+  ],
+  "author": "SynchroPeer Team",
+  "license": "MIT",
+  "devDependencies": {
+    "fs-extra": "^11.1.1"
+  },
+  "dependencies": {
+    "peerjs": "^1.5.2",
+    "webextension-polyfill": "^0.10.0"
+  }
+}

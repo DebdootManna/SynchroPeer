@@ -1,0 +1,39 @@
+{
+  "manifest_version": 2,
+  "name": "SynchroPeer",
+  "version": "1.0.0",
+  "description": "Pure P2P synchronization of bookmarks and history across browsers - No Cloud, No Server, Just You.",
+  "permissions": [
+    "bookmarks",
+    "history",
+    "storage",
+    "unlimitedStorage",
+    "<all_urls>"
+  ],
+  "background": {
+    "scripts": ["lib/browser-polyfill.min.js", "background.js"],
+    "persistent": false
+  },
+  "browser_action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "content_security_policy": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'",
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "synchropeer@extension.local",
+      "strict_min_version": "91.0"
+    }
+  }
+}
