@@ -138,10 +138,13 @@ function setupEventListeners() {
  */
 async function loadStatus() {
   try {
-    const response = await browser.runtime.sendMessage({ type: "get-status" });
+    const response = await browser.runtime.sendMessage({
+      action: "get_status",
+      data: {},
+    });
 
-    if (response) {
-      updateUIWithStatus(response);
+    if (response && response.success) {
+      updateUIWithStatus(response.data);
     }
   } catch (error) {
     console.error("[Popup] Error loading status:", error);
@@ -277,11 +280,23 @@ async function handleConnect() {
     // Disable button
     elements.connectBtn.disabled = true;
 
-    // Send message to background
+    // Initialize first
+    const initResponse = await browser.runtime.sendMessage({
+      action: "initialize",
+      data: {
+        passphrase: passphrase,
+        isPrimary: isPrimary,
+      },
+    });
+
+    if (!initResponse.success) {
+      throw new Error(initResponse.error || "Failed to initialize");
+    }
+
+    // Then start connection
     const response = await browser.runtime.sendMessage({
-      type: "start-connection",
-      passphrase: passphrase,
-      isPrimary: isPrimary,
+      action: "start_connection",
+      data: {},
     });
 
     if (response.success) {
@@ -316,7 +331,8 @@ async function handleSyncNow() {
     showStatusMessage("Initiating sync...", "warning");
 
     const response = await browser.runtime.sendMessage({
-      type: "sync-now",
+      action: "sync",
+      data: {},
     });
 
     if (response.success) {
@@ -352,7 +368,8 @@ async function handleDisconnect() {
     elements.disconnectBtn.disabled = true;
 
     const response = await browser.runtime.sendMessage({
-      type: "disconnect",
+      action: "disconnect",
+      data: {},
     });
 
     if (response.success) {
@@ -375,6 +392,7 @@ function handleBackgroundMessage(message) {
   console.log("[Popup] Received message:", message.type);
 
   switch (message.type) {
+    case "connection_state":
     case "connection-state":
     case "connection-state-change":
       handleConnectionStateChange(message);

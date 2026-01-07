@@ -3,7 +3,13 @@
   "name": "SynchroPeer",
   "version": "1.0.1",
   "description": "Pure P2P synchronization of bookmarks and history across browsers - No Cloud, No Server, Just You.",
-  "permissions": ["bookmarks", "history", "storage", "unlimitedStorage"],
+  "permissions": [
+    "bookmarks",
+    "history",
+    "storage",
+    "unlimitedStorage",
+    "offscreen"
+  ],
   "host_permissions": ["<all_urls>"],
   "background": {
     "service_worker": "background.js"
