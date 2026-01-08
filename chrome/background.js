@@ -1,7 +1,6 @@
 /**
- * SynchroPeer - Background Service Worker
+ * SynchroPeer - Background Service Worker / Script
  * Main orchestrator for P2P synchronization
- * Delegates WebRTC operations to offscreen document
  */
 
 // Import polyfill for Firefox compatibility
@@ -9,36 +8,16 @@ if (typeof browser === "undefined" && typeof chrome !== "undefined") {
   globalThis.browser = chrome;
 }
 
-// Import offscreen manager
-importScripts("offscreen-manager.js");
-
-console.log("[Background] Service worker starting...");
-console.log(
-  "[Background] Offscreen API available:",
-  typeof chrome.offscreen !== "undefined",
-);
-
-// Check if offscreen API is actually available
-if (typeof chrome.offscreen === "undefined") {
-  console.error("[Background] CRITICAL: Offscreen API not available!");
-  console.error(
-    "[Background] This browser may not support offscreen documents.",
-  );
-  console.error("[Background] WebRTC operations will fail.");
-} else {
-  console.log("[Background] Offscreen API check:", {
-    hasOffscreen: "offscreen" in chrome,
-    hasCreateDocument: typeof chrome.offscreen?.createDocument === "function",
-    hasCloseDocument: typeof chrome.offscreen?.closeDocument === "function",
-  });
-}
+// PeerJS is loaded via background.html
+let Peer = window.Peer;
 
 // Global state
 const state = {
   isInitialized: false,
   isPrimary: false,
   passphrase: null,
-  peerId: null,
+  peer: null,
+  connection: null,
   connectionState: "disconnected",
   lastSyncTime: 0,
   syncInProgress: false,
@@ -57,8 +36,15 @@ const messageHandlers = new Map();
  * Initialize the extension
  */
 async function initialize(passphrase, isPrimary) {
-  console.log("[Background] Initializing SynchroPeer...");
+  console.log("[Background] SynchroPeer initializing...");
   console.log("[Background] Mode:", isPrimary ? "Primary" : "Secondary");
+
+  // Check if PeerJS is available
+  if (!Peer) {
+    console.error("[Background] PeerJS not loaded!");
+    throw new Error("PeerJS not available");
+  }
+  console.log("[Background] PeerJS available:", typeof Peer);
 
   try {
     state.passphrase = passphrase;
@@ -66,14 +52,19 @@ async function initialize(passphrase, isPrimary) {
     state.isInitialized = true;
 
     // Generate peer ID from passphrase
-    const peerId = await generatePeerID(passphrase);
+    const peerId = await generatePeerID(passphrase, isPrimary);
     state.peerId = peerId;
 
-    console.log("[Background] Generated peer ID:", peerId);
     console.log(
-      "[Background] Peer ID (first 8 chars):",
+      "[Background] Generated peer ID (first 8 chars):",
       peerId.substring(0, 8),
     );
+
+    // Save configuration
+    await browser.storage.local.set({
+      passphrase: passphrase,
+      isPrimary: isPrimary,
+    });
 
     return { success: true, peerId };
   } catch (error) {
@@ -83,20 +74,18 @@ async function initialize(passphrase, isPrimary) {
 }
 
 /**
- * Generate a deterministic peer ID from passphrase
+ * Generate deterministic peer ID from passphrase
  */
-async function generatePeerID(passphrase, isPrimary = null) {
+async function generatePeerID(passphrase, isPrimary) {
   const encoder = new TextEncoder();
-  // Use provided isPrimary or fall back to state
-  const primary = isPrimary !== null ? isPrimary : state.isPrimary;
-  const suffix = primary ? "-primary" : "-secondary";
+  const suffix = isPrimary ? "-primary" : "-secondary";
   const data = encoder.encode(passphrase + suffix);
   const hashBuffer = await crypto.subtle.digest("SHA-256", data);
   const hashArray = Array.from(new Uint8Array(hashBuffer));
   const hashHex = hashArray
     .map((b) => b.toString(16).padStart(2, "0"))
     .join("");
-  return `sp-${hashHex.substring(0, 32)}`;
+  return "sp-" + hashHex.substring(0, 28);
 }
 
 /**
@@ -110,7 +99,16 @@ async function startP2PConnection() {
   }
 
   try {
-    const config = {
+    console.log(
+      `[Background] Starting P2P as ${state.isPrimary ? "PRIMARY" : "SECONDARY"}`,
+    );
+
+    // Generate peer ID
+    const peerId = await generatePeerID(state.passphrase, state.isPrimary);
+    console.log("[Background] Peer ID:", peerId);
+
+    // Initialize PeerJS
+    const peerConfig = {
       host: "0.peerjs.com",
       port: 443,
       path: "/",
@@ -119,206 +117,235 @@ async function startP2PConnection() {
       config: {
         iceServers: [
           { urls: "stun:stun.l.google.com:19302" },
-          { urls: "stun:global.stun.twilio.com:3478" },
           { urls: "stun:stun1.l.google.com:19302" },
           { urls: "stun:stun2.l.google.com:19302" },
+          { urls: "stun:global.stun.twilio.com:3478" },
         ],
       },
     };
 
-    // Initialize peer in offscreen document
-    console.log("[Background] Initializing peer in offscreen document...");
-    console.log("[Background] Using peer ID:", state.peerId);
+    state.peer = new Peer(peerId, peerConfig);
+    setupPeerEvents();
 
-    try {
-      const result = await initPeer(
-        state.peerId,
-        config,
-        state.isPrimary,
-        state.passphrase,
-      );
-      console.log("[Background] Peer initialization result:", result);
-    } catch (error) {
-      console.error("[Background] Failed to initialize peer:", error);
-      throw error;
+    // If secondary, connect to primary after peer is open
+    if (!state.isPrimary) {
+      state.peer.on("open", async () => {
+        const primaryPeerId = await generatePeerID(state.passphrase, true);
+        await connectToPeer(primaryPeerId);
+      });
     }
 
-    if (state.isPrimary) {
-      console.log("[Background] Primary peer opened, waiting for secondary...");
-      state.connectionState = "waiting";
-      notifyConnectionState("waiting", "Waiting for secondary device...");
-    } else {
-      console.log(
-        "[Background] Secondary peer opened, connecting to primary...",
-      );
-      state.connectionState = "connecting";
-      notifyConnectionState("connecting", "Connecting to primary device...");
-
-      // Connect to primary - generate primary peer ID
-      const primaryPeerId = await generatePeerID(state.passphrase, true);
-      console.log("[Background] Primary peer ID to connect to:", primaryPeerId);
-      console.log(
-        "[Background] Primary peer ID (first 8):",
-        primaryPeerId.substring(0, 8),
-      );
-      await connectToPeer(primaryPeerId);
-    }
-
-    return { success: true };
+    return { success: true, peerId };
   } catch (error) {
-    console.error("[Background] Failed to start P2P connection:", error);
+    console.error("[Background] Error starting P2P:", error);
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * Setup PeerJS event handlers
+ */
+function setupPeerEvents() {
+  state.peer.on("open", (id) => {
+    console.log("[Background] Peer opened:", id);
+    state.connectionState = "waiting";
+    notifyConnectionState("waiting");
+  });
+
+  state.peer.on("connection", (conn) => {
+    console.log("[Background] Incoming connection from:", conn.peer);
+    setupDataConnection(conn);
+  });
+
+  state.peer.on("error", (error) => {
+    console.error("[Background] Peer error:", error);
+    handlePeerError(error);
+  });
+
+  state.peer.on("disconnected", () => {
+    console.log("[Background] Peer disconnected, attempting reconnect...");
+    // Attempt to reconnect
+    setTimeout(() => {
+      if (state.peer && !state.peer.destroyed) {
+        state.peer.reconnect();
+      }
+    }, 5000);
+  });
+
+  state.peer.on("close", () => {
+    console.log("[Background] Peer closed");
+    state.connectionState = "disconnected";
+    notifyConnectionState("disconnected");
+  });
+
+  return { success: true };
+}
+
+/**
+ * Connect to a peer
+ */
+function connectToPeer(peerId) {
+  return new Promise((resolve, reject) => {
+    console.log("[Background] Connecting to peer:", peerId);
+    state.connectionState = "connecting";
+    notifyConnectionState("connecting");
+
+    const conn = state.peer.connect(peerId, {
+      reliable: true,
+      serialization: "json",
+    });
+
+    setupDataConnection(conn);
+
+    const timeout = setTimeout(() => {
+      if (state.connectionState !== "connected") {
+        reject(new Error("Connection timeout"));
+      }
+    }, 30000);
+
+    conn.on("open", () => {
+      clearTimeout(timeout);
+      resolve();
+    });
+
+    conn.on("error", (error) => {
+      clearTimeout(timeout);
+      reject(error);
+    });
+  });
+}
+
+/**
+ * Handle peer errors intelligently
+ */
+function handlePeerError(error) {
+  // Don't immediately abort on every error
+  const recoverableErrors = ["peer-unavailable", "network", "disconnected"];
+
+  if (error.type && recoverableErrors.includes(error.type)) {
+    console.log("[Background] Recoverable error, keeping connection alive");
+    state.connectionState = "waiting";
+    notifyConnectionState("waiting", "Retrying...");
+    return;
+  }
+
+  // Only abort on fatal errors
+  state.connectionState = "error";
+  notifyConnectionState("error", error.message || error.toString());
+}
+
+/**
+ * Setup data connection event handlers
+ */
+function setupDataConnection(conn) {
+  state.connection = conn;
+
+  conn.on("open", () => {
+    console.log("[Background] Data channel opened");
+    state.connectionState = "connected";
+    notifyConnectionState("connected");
+
+    // Send handshake
+    sendMessage({
+      type: "handshake",
+      timestamp: Date.now(),
+      version: "1.0",
+    });
+  });
+
+  conn.on("data", (data) => {
+    console.log("[Background] Received:", data.type);
+    handleIncomingMessage(data);
+  });
+
+  conn.on("close", () => {
+    console.log("[Background] Connection closed");
+    state.connectionState = "disconnected";
+    notifyConnectionState("disconnected");
+  });
+
+  conn.on("error", (error) => {
+    console.error("[Background] Connection error:", error);
     state.connectionState = "error";
     notifyConnectionState("error", error.message);
-    throw error;
-  }
+  });
 }
 
 /**
- * Handle incoming messages from offscreen document
- */
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  console.log("[Background] Received message:", message.type);
-
-  // Messages from offscreen document (peer events)
-  if (
-    message.type?.startsWith("PEER_") ||
-    message.type?.startsWith("CONNECTION_")
-  ) {
-    handleOffscreenMessage(message);
-    return false;
-  }
-
-  // Messages from popup
-  const handler = messageHandlers.get(message.action);
-  if (handler) {
-    handler(message.data)
-      .then((result) => sendResponse({ success: true, data: result }))
-      .catch((error) => sendResponse({ success: false, error: error.message }));
-    return true; // Keep channel open for async response
-  }
-
-  console.warn("[Background] Unknown message action:", message.action);
-  sendResponse({ success: false, error: "Unknown action" });
-  return false;
-});
-
-/**
- * Handle messages from offscreen document
- */
-function handleOffscreenMessage(message) {
-  console.log("[Background] Offscreen event:", message.type);
-
-  switch (message.type) {
-    case "PEER_OPENED":
-      console.log("[Background] Peer opened with ID:", message.data.id);
-      break;
-
-    case "PEER_INCOMING_CONNECTION":
-      console.log("[Background] Incoming connection from:", message.data.peer);
-      break;
-
-    case "CONNECTION_OPENED":
-      console.log("[Background] Data connection established!");
-      state.connectionState = "connected";
-      notifyConnectionState("connected", "Connected to peer");
-
-      // Send handshake
-      sendPeerData({
-        type: "handshake",
-        timestamp: Date.now(),
-        version: "1.0",
-      }).catch((error) =>
-        console.error("[Background] Failed to send handshake:", error),
-      );
-      break;
-
-    case "CONNECTION_DATA":
-      handleIncomingMessage(message.data).catch((error) => {
-        console.error("[Background] Failed to handle incoming message:", error);
-      });
-      break;
-
-    case "CONNECTION_CLOSED":
-      console.log("[Background] Connection closed");
-      state.connectionState = "disconnected";
-      notifyConnectionState("disconnected", "Connection closed");
-      break;
-
-    case "CONNECTION_ERROR":
-      console.error("[Background] Connection error:", message.data.error);
-      state.connectionState = "error";
-      notifyConnectionState("error", message.data.error);
-      break;
-
-    case "PEER_DISCONNECTED":
-      console.log("[Background] Peer disconnected from signaling server");
-      state.connectionState = "disconnected";
-      notifyConnectionState("disconnected", "Disconnected from server");
-      break;
-
-    case "PEER_ERROR":
-      console.error("[Background] Peer error:", message.data.error);
-      state.connectionState = "error";
-      notifyConnectionState("error", message.data.error);
-      break;
-  }
-}
-
-/**
- * Handle incoming messages from peer
+ * Handle incoming messages
  */
 async function handleIncomingMessage(message) {
-  console.log("[Background] Handling message type:", message.type);
-
   switch (message.type) {
     case "handshake":
+      console.log("[Background] Received handshake");
       await handleHandshake(message);
       break;
+
     case "sync_request":
+    case "sync-request":
+      console.log("[Background] Received sync request");
       await handleSyncRequest(message);
       break;
+
     case "sync_response":
+    case "sync-response":
+      console.log("[Background] Received sync response");
       await handleSyncResponse(message);
       break;
+
     case "snapshot":
+      console.log("[Background] Received snapshot");
       await handleSnapshot(message);
       break;
+
+    case "sync_complete":
+    case "sync-complete":
+      console.log("[Background] Sync complete");
+      state.syncInProgress = false;
+      notifyConnectionState("connected", "Sync completed");
+      break;
+
     default:
       console.warn("[Background] Unknown message type:", message.type);
   }
 }
 
 /**
- * Handle handshake message
+ * Handle handshake
  */
 async function handleHandshake(message) {
   console.log("[Background] Received handshake from peer");
 
   // Send handshake response
-  await sendPeerData({
+  sendMessage({
     type: "handshake",
     timestamp: Date.now(),
   });
 }
 
 /**
- * Handle sync request
+ * Handle sync request from peer
  */
 async function handleSyncRequest(message) {
-  console.log("[Background] Received sync request");
-
   try {
+    state.syncInProgress = true;
+    notifyConnectionState("connected", "Creating snapshot...");
+
+    // Create snapshot
     const snapshot = await createSnapshot();
+
+    // Encrypt snapshot
     const encryptedSnapshot = await encryptData(snapshot, state.passphrase);
 
-    await sendPeerData({
+    // Send snapshot
+    sendMessage({
       type: "sync_response",
       data: encryptedSnapshot,
       timestamp: Date.now(),
     });
   } catch (error) {
-    console.error("[Background] Failed to handle sync request:", error);
-    await sendPeerData({
+    console.error("[Background] Error handling sync request:", error);
+    sendMessage({
       type: "error",
       message: error.message,
     });
@@ -326,37 +353,67 @@ async function handleSyncRequest(message) {
 }
 
 /**
- * Handle sync response
+ * Handle sync response from peer
  */
 async function handleSyncResponse(message) {
-  console.log("[Background] Received sync response");
-  // Process in handleSnapshot
-  await handleSnapshot(message);
+  // Placeholder for handling sync response
 }
 
 /**
- * Handle snapshot data
+ * Handle snapshot from peer
  */
 async function handleSnapshot(message) {
-  console.log("[Background] Processing snapshot...");
-
   try {
+    notifyConnectionState("connected", "Applying sync...");
+
+    // Decrypt snapshot
     const snapshot = await decryptData(message.data, state.passphrase);
+
+    // Apply snapshot
     const results = await applySnapshot(snapshot);
 
+    console.log("[Background] Sync results:", results);
+
+    // Update stats
+    state.stats.totalBookmarksSynced += results.bookmarksAdded;
+    state.stats.totalHistorySynced += results.historyAdded;
+    state.stats.syncCount++;
     state.lastSyncTime = Date.now();
-    state.stats = results;
 
-    console.log("[Background] Snapshot applied successfully:", results);
+    await browser.storage.local.set({
+      lastSyncTime: state.lastSyncTime,
+      stats: state.stats,
+    });
 
-    await sendPeerData({
+    // Send completion message
+    sendMessage({
       type: "sync_complete",
-      results,
+      results: results,
       timestamp: Date.now(),
     });
+
+    state.syncInProgress = false;
+    notifyConnectionState("connected", "Sync completed successfully");
   } catch (error) {
-    console.error("[Background] Failed to apply snapshot:", error);
-    throw error;
+    console.error("[Background] Error handling snapshot:", error);
+    state.syncInProgress = false;
+    notifyConnectionState("error", "Sync failed: " + error.message);
+  }
+}
+
+/**
+ * Send message to peer
+ */
+function sendMessage(message) {
+  if (!state.connection || state.connectionState !== "connected") {
+    console.warn("[Background] Not connected, cannot send message");
+    return;
+  }
+
+  try {
+    state.connection.send(message);
+  } catch (error) {
+    console.error("[Background] Error sending message:", error);
   }
 }
 
@@ -364,52 +421,54 @@ async function handleSnapshot(message) {
  * Initiate sync
  */
 async function initiateSync() {
-  if (!state.isInitialized) {
-    throw new Error("Not initialized");
+  if (state.syncInProgress) {
+    console.log("[Background] Sync already in progress");
+    return { success: false, error: "Sync already in progress" };
   }
 
   if (state.connectionState !== "connected") {
-    throw new Error("Not connected to peer");
+    return { success: false, error: "Not connected to peer" };
   }
-
-  if (state.syncInProgress) {
-    throw new Error("Sync already in progress");
-  }
-
-  console.log("[Background] Initiating sync...");
-  state.syncInProgress = true;
 
   try {
+    state.syncInProgress = true;
     const startTime = Date.now();
+
+    notifyConnectionState("connected", "Starting sync...");
+
+    // Create snapshot
+    notifyConnectionState("connected", "Creating snapshot...");
+    const localSnapshot = await createSnapshot();
+
+    // Encrypt snapshot
+    notifyConnectionState("connected", "Encrypting data...");
+    const encryptedSnapshot = await encryptData(
+      localSnapshot,
+      state.passphrase,
+    );
 
     if (state.isPrimary) {
       // Primary: send request and wait for response
-      await sendPeerData({
+      sendMessage({
         type: "sync_request",
         timestamp: Date.now(),
       });
     } else {
       // Secondary: create and send snapshot
-      const localSnapshot = await createSnapshot();
-      const encryptedSnapshot = await encryptData(
-        localSnapshot,
-        state.passphrase,
-      );
-
-      await sendPeerData({
+      sendMessage({
         type: "snapshot",
         data: encryptedSnapshot,
         timestamp: Date.now(),
       });
     }
 
-    console.log("[Background] Sync initiated in", Date.now() - startTime, "ms");
+    state.stats.lastSyncDuration = Date.now() - startTime;
+
     return { success: true };
   } catch (error) {
-    console.error("[Background] Sync failed:", error);
-    throw error;
-  } finally {
+    console.error("[Background] Error initiating sync:", error);
     state.syncInProgress = false;
+    return { success: false, error: error.message };
   }
 }
 
@@ -424,198 +483,213 @@ async function createSnapshot() {
 
   return {
     timestamp: Date.now(),
-    bookmarks,
-    history,
+    bookmarks: bookmarks,
+    history: history,
     bookmarkCount: bookmarks.length,
     historyCount: history.length,
   };
 }
 
 /**
- * Extract bookmarks
+ * Extract all bookmarks
  */
 async function extractBookmarks() {
-  console.log("[Background] Extracting bookmarks...");
-  const bookmarkTree = await chrome.bookmarks.getTree();
-  const flatBookmarks = [];
+  try {
+    const bookmarkTree = await browser.bookmarks.getTree();
+    const flatBookmarks = [];
 
-  const traverse = (nodes, path = []) => {
-    for (const node of nodes) {
-      const bookmark = {
-        id: node.id,
-        parentId: node.parentId,
-        index: node.index,
-        title: node.title || "",
-        url: node.url || "",
-        dateAdded: node.dateAdded || Date.now(),
-        type: node.url ? "bookmark" : "folder",
-        path: [...path, node.title || ""].join("/"),
-      };
+    const traverse = (nodes, path = []) => {
+      for (const node of nodes) {
+        const bookmark = {
+          id: node.id,
+          parentId: node.parentId,
+          index: node.index,
+          title: node.title || "",
+          url: node.url || null,
+          dateAdded: node.dateAdded || Date.now(),
+          type: node.url ? "bookmark" : "folder",
+          path: [...path, node.title || "root"],
+        };
 
-      if (bookmark.url || bookmark.type === "folder") {
         flatBookmarks.push(bookmark);
-      }
 
-      if (node.children) {
-        traverse(node.children, [...path, node.title || ""]);
+        if (node.children) {
+          traverse(node.children, bookmark.path);
+        }
       }
-    }
-  };
+    };
 
-  traverse(bookmarkTree);
-  console.log("[Background] Extracted", flatBookmarks.length, "bookmarks");
-  return flatBookmarks;
+    traverse(bookmarkTree);
+    return flatBookmarks;
+  } catch (error) {
+    console.error("[Background] Error extracting bookmarks:", error);
+    return [];
+  }
 }
 
 /**
- * Extract history
+ * Extract browsing history
  */
-async function extractHistory(maxResults = 1000) {
-  console.log("[Background] Extracting history...");
+async function extractHistory(maxItems = 5000) {
+  try {
+    const historyItems = await browser.history.search({
+      text: "",
+      maxResults: maxItems,
+      startTime: 0,
+    });
 
-  const historyItems = await chrome.history.search({
-    text: "",
-    maxResults,
-    startTime: Date.now() - 30 * 24 * 60 * 60 * 1000, // Last 30 days
-  });
-
-  const history = historyItems.map((item) => ({
-    url: item.url,
-    title: item.title || "",
-    visitCount: item.visitCount || 1,
-    lastVisitTime: item.lastVisitTime || Date.now(),
-  }));
-
-  console.log("[Background] Extracted", history.length, "history items");
-  return history;
+    return historyItems.map((item) => ({
+      url: item.url,
+      title: item.title || "",
+      visitCount: item.visitCount || 0,
+      lastVisitTime: item.lastVisitTime || Date.now(),
+    }));
+  } catch (error) {
+    console.error("[Background] Error extracting history:", error);
+    return [];
+  }
 }
 
 /**
- * Apply snapshot to local browser
+ * Apply snapshot (merge with local data)
  */
-async function applySnapshot(snapshot) {
+async function applySnapshot(remoteSnapshot) {
   const results = {
     bookmarksAdded: 0,
     historyAdded: 0,
     errors: [],
   };
 
-  // Create maps for quick lookup
+  // Get local snapshot for comparison
   const localSnapshot = await createSnapshot();
 
+  // Create lookup maps
   const localBookmarkMap = new Map();
   for (const bookmark of localSnapshot.bookmarks) {
-    const key = `${bookmark.url}|${bookmark.title}`;
+    const key = bookmark.url
+      ? `url:${bookmark.url}`
+      : `folder:${bookmark.path.join("/")}`;
     localBookmarkMap.set(key, bookmark);
   }
 
-  const localHistoryMap = new Map();
-  for (const historyItem of localSnapshot.history) {
-    const key = `${historyItem.url}`;
-    localHistoryMap.set(key, historyItem);
-  }
+  const localHistoryMap = new Map(localSnapshot.history.map((h) => [h.url, h]));
 
   // Apply bookmarks
-  for (const bookmark of snapshot.bookmarks) {
-    const localBookmark = localBookmarkMap.get(
-      `${bookmark.url}|${bookmark.title}`,
-    );
-    if (!localBookmark && bookmark.url) {
+  for (const remoteBookmark of remoteSnapshot.bookmarks) {
+    const key = remoteBookmark.url
+      ? `url:${remoteBookmark.url}`
+      : `folder:${remoteBookmark.path.join("/")}`;
+    const localBookmark = localBookmarkMap.get(key);
+
+    if (!localBookmark && remoteBookmark.url) {
       try {
-        await addBookmark(bookmark);
+        await addBookmark(remoteBookmark);
         results.bookmarksAdded++;
       } catch (error) {
-        console.error("[Background] Failed to add bookmark:", error);
+        console.error("[Background] Error adding bookmark:", error);
         results.errors.push({ type: "bookmark", error: error.message });
       }
     }
   }
 
   // Apply history
-  for (const historyItem of snapshot.history) {
-    const localHistory = localHistoryMap.get(historyItem.url);
-    if (!localHistory) {
+  for (const remoteHistory of remoteSnapshot.history) {
+    const localHistory = localHistoryMap.get(remoteHistory.url);
+
+    if (
+      !localHistory ||
+      remoteHistory.lastVisitTime > localHistory.lastVisitTime
+    ) {
       try {
-        await addHistoryItem(historyItem);
+        await addHistoryItem(remoteHistory);
         results.historyAdded++;
       } catch (error) {
-        console.error("[Background] Failed to add history item:", error);
+        console.error("[Background] Error adding history:", error);
         results.errors.push({ type: "history", error: error.message });
       }
     }
   }
 
-  console.log("[Background] Applied snapshot:", results);
   return results;
 }
 
 /**
- * Add bookmark
+ * Add bookmark to browser
  */
 async function addBookmark(bookmark) {
-  // Find or create parent folder
-  const parentId = await findOrCreateParentFolder(bookmark.path);
+  try {
+    // Find or create parent folder
+    const parentId = await findOrCreateParentFolder(bookmark.path.slice(0, -1));
 
-  // Check if bookmark already exists
-  const existing = await chrome.bookmarks.search({ url: bookmark.url });
-  if (existing.length > 0) return;
-
-  await chrome.bookmarks.create({
-    parentId,
-    title: bookmark.title,
-    url: bookmark.url,
-  });
-}
-
-/**
- * Find or create parent folder for bookmark
- */
-async function findOrCreateParentFolder(path) {
-  // Default to "Other Bookmarks"
-  let currentParentId = "2";
-
-  const pathParts = path.split("/").filter((p) => p);
-  for (const folderName of pathParts) {
-    const children = await chrome.bookmarks.getChildren(currentParentId);
-    let found = children.find(
-      (child) => child.title === folderName && !child.url,
-    );
-
-    if (!found) {
-      found = await chrome.bookmarks.create({
-        parentId: currentParentId,
-        title: folderName,
+    // Check if bookmark already exists
+    const existing = await browser.bookmarks.search({ url: bookmark.url });
+    if (existing.length === 0) {
+      await browser.bookmarks.create({
+        parentId: parentId,
+        title: bookmark.title,
+        url: bookmark.url,
       });
     }
-
-    currentParentId = found.id;
+  } catch (error) {
+    console.error("[Background] Error in addBookmark:", error);
+    throw error;
   }
-
-  return currentParentId;
 }
 
 /**
- * Add history item
+ * Find or create parent folder
+ */
+async function findOrCreateParentFolder(path) {
+  try {
+    let currentParentId = "1"; // Default bookmarks folder
+
+    for (let i = 1; i < path.length; i++) {
+      const folderName = path[i];
+      const children = await browser.bookmarks.getChildren(currentParentId);
+
+      let found = children.find(
+        (child) => !child.url && child.title === folderName,
+      );
+
+      if (!found) {
+        found = await browser.bookmarks.create({
+          parentId: currentParentId,
+          title: folderName,
+        });
+      }
+
+      currentParentId = found.id;
+    }
+
+    return currentParentId;
+  } catch (error) {
+    console.error("[Background] Error in findOrCreateParentFolder:", error);
+    return "1";
+  }
+}
+
+/**
+ * Add history item to browser
  */
 async function addHistoryItem(historyItem) {
-  // Chrome History API doesn't have an 'add' method
-  // We can only visit the URL to add it to history
-  // This is a limitation of the Chrome API
-
-  // For now, we'll use the visits API if available
   try {
-    await chrome.history.addUrl({
+    if (!historyItem.url || !historyItem.url.startsWith("http")) {
+      return;
+    }
+
+    await browser.history.addUrl({
       url: historyItem.url,
       title: historyItem.title,
       visitTime: historyItem.lastVisitTime,
     });
   } catch (error) {
-    console.warn("[Background] Could not add history item:", error.message);
+    console.error("[Background] Error in addHistoryItem:", error);
+    throw error;
   }
 }
 
 /**
- * Encrypt data
+ * Encrypt data using AES-256-GCM
  */
 async function encryptData(data, passphrase) {
   const algorithm = "AES-GCM";
@@ -623,9 +697,11 @@ async function encryptData(data, passphrase) {
   const ivLength = 12;
   const iterations = 100000;
 
+  // Generate random salt and IV
   const salt = crypto.getRandomValues(new Uint8Array(saltLength));
   const iv = crypto.getRandomValues(new Uint8Array(ivLength));
 
+  // Derive key
   const encoder = new TextEncoder();
   const passphraseKey = await crypto.subtle.importKey(
     "raw",
@@ -638,54 +714,57 @@ async function encryptData(data, passphrase) {
   const key = await crypto.subtle.deriveKey(
     {
       name: "PBKDF2",
-      salt,
-      iterations,
+      salt: salt,
+      iterations: iterations,
       hash: "SHA-256",
     },
     passphraseKey,
     { name: algorithm, length: 256 },
     false,
-    ["encrypt"],
+    ["encrypt", "decrypt"],
   );
 
+  // Encrypt
   const dataString = JSON.stringify(data);
   const dataBuffer = encoder.encode(dataString);
 
   const encryptedBuffer = await crypto.subtle.encrypt(
-    {
-      name: algorithm,
-      iv,
-    },
+    { name: algorithm, iv: iv },
     key,
     dataBuffer,
   );
 
+  // Combine salt + iv + encrypted data
   const encryptedArray = new Uint8Array(encryptedBuffer);
   const combined = new Uint8Array(
-    saltLength + ivLength + encryptedArray.length,
+    salt.length + iv.length + encryptedArray.length,
   );
   combined.set(salt, 0);
-  combined.set(iv, saltLength);
-  combined.set(encryptedArray, saltLength + ivLength);
+  combined.set(iv, salt.length);
+  combined.set(encryptedArray, salt.length + iv.length);
 
-  return arrayBufferToBase64(combined.buffer);
+  // Convert to base64
+  return arrayBufferToBase64(combined);
 }
 
 /**
- * Decrypt data
+ * Decrypt data using AES-256-GCM
  */
-async function decryptData(encryptedBase64, passphrase) {
+async function decryptData(encryptedData, passphrase) {
   const algorithm = "AES-GCM";
   const saltLength = 16;
   const ivLength = 12;
   const iterations = 100000;
 
-  const combined = new Uint8Array(base64ToArrayBuffer(encryptedBase64));
+  // Convert from base64
+  const combined = base64ToArrayBuffer(encryptedData);
 
+  // Extract salt, iv, and encrypted data
   const salt = combined.slice(0, saltLength);
   const iv = combined.slice(saltLength, saltLength + ivLength);
   const encrypted = combined.slice(saltLength + ivLength);
 
+  // Derive key
   const encoder = new TextEncoder();
   const passphraseKey = await crypto.subtle.importKey(
     "raw",
@@ -698,25 +777,24 @@ async function decryptData(encryptedBase64, passphrase) {
   const key = await crypto.subtle.deriveKey(
     {
       name: "PBKDF2",
-      salt,
-      iterations,
+      salt: salt,
+      iterations: iterations,
       hash: "SHA-256",
     },
     passphraseKey,
     { name: algorithm, length: 256 },
     false,
-    ["decrypt"],
+    ["encrypt", "decrypt"],
   );
 
+  // Decrypt
   const decryptedBuffer = await crypto.subtle.decrypt(
-    {
-      name: algorithm,
-      iv,
-    },
+    { name: algorithm, iv: iv },
     key,
     encrypted,
   );
 
+  // Parse JSON
   const decoder = new TextDecoder();
   const decryptedString = decoder.decode(decryptedBuffer);
   return JSON.parse(decryptedString);
@@ -736,7 +814,7 @@ function arrayBufferToBase64(buffer) {
 }
 
 /**
- * Convert Base64 to ArrayBuffer
+ * Convert Base64 to Uint8Array
  */
 function base64ToArrayBuffer(base64) {
   const binary = atob(base64);
@@ -745,28 +823,26 @@ function base64ToArrayBuffer(base64) {
   for (let i = 0; i < len; i++) {
     bytes[i] = binary.charCodeAt(i);
   }
-  return bytes.buffer;
+  return bytes;
 }
 
 /**
  * Notify connection state change
  */
-function notifyConnectionState(state, message) {
-  console.log("[Background] Connection state:", state, message);
-
+function notifyConnectionState(state, message = "") {
   // Update badge
   updateBadge(state);
 
-  // Notify popup if open
-  chrome.runtime
+  // Send to popup if open
+  browser.runtime
     .sendMessage({
       type: "connection_state",
-      state,
-      message,
+      state: state,
+      message: message,
       timestamp: Date.now(),
     })
     .catch(() => {
-      // Popup might not be open, ignore error
+      // Ignore if popup is not open
     });
 }
 
@@ -775,34 +851,39 @@ function notifyConnectionState(state, message) {
  */
 function updateBadge(state) {
   const badges = {
-    disconnected: { text: "", color: "#666666" },
+    disconnected: { text: "", color: "#888888" },
     connecting: { text: "...", color: "#FFA500" },
-    waiting: { text: "⏳", color: "#0000FF" },
-    connected: { text: "✓", color: "#00FF00" },
-    error: { text: "✗", color: "#FF0000" },
+    waiting: { text: "⏳", color: "#FFA500" },
+    connected: { text: "✓", color: "#00AA00" },
+    error: { text: "!", color: "#FF0000" },
   };
 
   const badge = badges[state] || badges.disconnected;
 
-  chrome.action.setBadgeText({ text: badge.text });
-  chrome.action.setBadgeBackgroundColor({ color: badge.color });
+  // Firefox Manifest V2 uses browserAction instead of action
+  const badgeAPI = browser.browserAction || browser.action;
+
+  badgeAPI.setBadgeText({ text: badge.text });
+  badgeAPI.setBadgeBackgroundColor({ color: badge.color });
 }
 
 /**
- * Disconnect
+ * Disconnect from peer
  */
-async function disconnect() {
-  console.log("[Background] Disconnecting...");
+function disconnect() {
+  if (state.connection) {
+    state.connection.close();
+    state.connection = null;
+  }
 
-  try {
-    await disconnectPeer();
-  } catch (error) {
-    console.error("[Background] Error during disconnect:", error);
+  if (state.peer) {
+    state.peer.destroy();
+    state.peer = null;
   }
 
   state.connectionState = "disconnected";
-  state.isInitialized = false;
-  notifyConnectionState("disconnected", "Disconnected");
+  state.syncInProgress = false;
+  notifyConnectionState("disconnected");
 }
 
 /**
@@ -819,25 +900,60 @@ function getStatus() {
   };
 }
 
-// Register message handlers
-messageHandlers.set("initialize", async (data) => {
-  return await initialize(data.passphrase, data.isPrimary);
+// Message listener for popup communication
+browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  console.log("[Background] Received message:", message.action || message.type);
+
+  (async () => {
+    try {
+      // Support both old (type) and new (action) formats
+      const action = message.action || message.type;
+      const data = message.data || message;
+
+      switch (action) {
+        case "initialize":
+          const initResult = await initialize(data.passphrase, data.isPrimary);
+          sendResponse({ success: true, data: initResult });
+          break;
+
+        case "start_connection":
+        case "start-connection":
+          const result = await startP2PConnection();
+          sendResponse({ success: true, data: result });
+          break;
+
+        case "disconnect":
+          disconnect();
+          sendResponse({ success: true, data: {} });
+          break;
+
+        case "sync":
+        case "sync-now":
+          const syncResult = await initiateSync();
+          sendResponse({ success: true, data: syncResult });
+          break;
+
+        case "get_status":
+        case "get-status":
+          const status = getStatus();
+          sendResponse({ success: true, data: status });
+          break;
+
+        default:
+          console.warn("[Background] Unknown action:", action);
+          sendResponse({ success: false, error: "Unknown action" });
+      }
+    } catch (error) {
+      console.error("[Background] Error handling message:", error);
+      sendResponse({ success: false, error: error.message });
+    }
+  })();
+
+  return true; // Keep channel open for async response
 });
 
-messageHandlers.set("start_connection", async () => {
-  return await startP2PConnection();
-});
+// Check if PeerJS is loaded on startup
+console.log("[Background] SynchroPeer background script loaded");
+console.log("[Background] PeerJS available:", typeof Peer !== "undefined");
 
-messageHandlers.set("sync", async () => {
-  return await initiateSync();
-});
-
-messageHandlers.set("disconnect", async () => {
-  return await disconnect();
-});
-
-messageHandlers.set("get_status", async () => {
-  return getStatus();
-});
-
-console.log("[Background] Service worker initialized");
+console.log("[Background] SynchroPeer background script loaded");
