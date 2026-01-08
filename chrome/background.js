@@ -18,6 +18,21 @@ console.log(
   typeof chrome.offscreen !== "undefined",
 );
 
+// Check if offscreen API is actually available
+if (typeof chrome.offscreen === "undefined") {
+  console.error("[Background] CRITICAL: Offscreen API not available!");
+  console.error(
+    "[Background] This browser may not support offscreen documents.",
+  );
+  console.error("[Background] WebRTC operations will fail.");
+} else {
+  console.log("[Background] Offscreen API check:", {
+    hasOffscreen: "offscreen" in chrome,
+    hasCreateDocument: typeof chrome.offscreen?.createDocument === "function",
+    hasCloseDocument: typeof chrome.offscreen?.closeDocument === "function",
+  });
+}
+
 // Global state
 const state = {
   isInitialized: false,
@@ -54,8 +69,9 @@ async function initialize(passphrase, isPrimary) {
     const peerId = await generatePeerID(passphrase);
     state.peerId = peerId;
 
+    console.log("[Background] Generated peer ID:", peerId);
     console.log(
-      "[Background] Generated peer ID (first 8 chars):",
+      "[Background] Peer ID (first 8 chars):",
       peerId.substring(0, 8),
     );
 
@@ -69,9 +85,11 @@ async function initialize(passphrase, isPrimary) {
 /**
  * Generate a deterministic peer ID from passphrase
  */
-async function generatePeerID(passphrase) {
+async function generatePeerID(passphrase, isPrimary = null) {
   const encoder = new TextEncoder();
-  const suffix = state.isPrimary ? "-primary" : "-secondary";
+  // Use provided isPrimary or fall back to state
+  const primary = isPrimary !== null ? isPrimary : state.isPrimary;
+  const suffix = primary ? "-primary" : "-secondary";
   const data = encoder.encode(passphrase + suffix);
   const hashBuffer = await crypto.subtle.digest("SHA-256", data);
   const hashArray = Array.from(new Uint8Array(hashBuffer));
@@ -110,7 +128,20 @@ async function startP2PConnection() {
 
     // Initialize peer in offscreen document
     console.log("[Background] Initializing peer in offscreen document...");
-    await initPeer(state.peerId, config, state.isPrimary, state.passphrase);
+    console.log("[Background] Using peer ID:", state.peerId);
+
+    try {
+      const result = await initPeer(
+        state.peerId,
+        config,
+        state.isPrimary,
+        state.passphrase,
+      );
+      console.log("[Background] Peer initialization result:", result);
+    } catch (error) {
+      console.error("[Background] Failed to initialize peer:", error);
+      throw error;
+    }
 
     if (state.isPrimary) {
       console.log("[Background] Primary peer opened, waiting for secondary...");
@@ -123,9 +154,14 @@ async function startP2PConnection() {
       state.connectionState = "connecting";
       notifyConnectionState("connecting", "Connecting to primary device...");
 
-      // Connect to primary
-      const primaryPeerId = await generatePeerID(state.passphrase);
-      await connectToPeer(primaryPeerId.replace("-secondary", "-primary"));
+      // Connect to primary - generate primary peer ID
+      const primaryPeerId = await generatePeerID(state.passphrase, true);
+      console.log("[Background] Primary peer ID to connect to:", primaryPeerId);
+      console.log(
+        "[Background] Primary peer ID (first 8):",
+        primaryPeerId.substring(0, 8),
+      );
+      await connectToPeer(primaryPeerId);
     }
 
     return { success: true };

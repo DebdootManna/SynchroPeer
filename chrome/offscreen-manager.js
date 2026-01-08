@@ -20,15 +20,19 @@ async function ensureOffscreenDocument() {
 
   try {
     await chrome.offscreen.createDocument({
-      url: chrome.runtime.getURL('offscreen.html'),
+      url: chrome.runtime.getURL("offscreen.html"),
       reasons: [chrome.offscreen.Reason.DOM_SCRAPING],
-      justification: 'Needed to access WebRTC APIs (RTCPeerConnection) which are not available in service worker context'
+      justification:
+        "Needed to access WebRTC APIs (RTCPeerConnection) which are not available in service worker context",
     });
 
     offscreenDocumentCreated = true;
     console.log("[OffscreenManager] Offscreen document created successfully");
   } catch (error) {
-    console.error("[OffscreenManager] Failed to create offscreen document:", error);
+    console.error(
+      "[OffscreenManager] Failed to create offscreen document:",
+      error,
+    );
     throw error;
   }
 }
@@ -38,14 +42,17 @@ async function ensureOffscreenDocument() {
  */
 async function hasOffscreenDocument() {
   // In Chrome, we can check if any offscreen documents exist
-  if ('offscreen' in chrome && chrome.offscreen) {
+  if ("offscreen" in chrome && chrome.offscreen) {
     try {
       const contexts = await chrome.runtime.getContexts({
-        contextTypes: ['OFFSCREEN_DOCUMENT']
+        contextTypes: ["OFFSCREEN_DOCUMENT"],
       });
       return contexts.length > 0;
     } catch (error) {
-      console.warn("[OffscreenManager] Could not check for offscreen document:", error);
+      console.warn(
+        "[OffscreenManager] Could not check for offscreen document:",
+        error,
+      );
       return offscreenDocumentCreated;
     }
   }
@@ -56,7 +63,7 @@ async function hasOffscreenDocument() {
  * Close the offscreen document
  */
 async function closeOffscreenDocument() {
-  if (!await hasOffscreenDocument()) {
+  if (!(await hasOffscreenDocument())) {
     console.log("[OffscreenManager] No offscreen document to close");
     return;
   }
@@ -68,7 +75,10 @@ async function closeOffscreenDocument() {
     offscreenDocumentCreated = false;
     console.log("[OffscreenManager] Offscreen document closed");
   } catch (error) {
-    console.error("[OffscreenManager] Failed to close offscreen document:", error);
+    console.error(
+      "[OffscreenManager] Failed to close offscreen document:",
+      error,
+    );
     throw error;
   }
 }
@@ -77,16 +87,41 @@ async function closeOffscreenDocument() {
  * Send a message to the offscreen document
  */
 async function sendToOffscreen(message) {
-  await ensureOffscreenDocument();
+  console.log("[OffscreenManager] Sending message to offscreen:", message.type);
+
+  try {
+    await ensureOffscreenDocument();
+  } catch (error) {
+    console.error(
+      "[OffscreenManager] Failed to ensure offscreen document:",
+      error,
+    );
+    throw error;
+  }
 
   return new Promise((resolve, reject) => {
+    console.log(
+      "[OffscreenManager] Sending message via chrome.runtime.sendMessage",
+    );
+
     chrome.runtime.sendMessage(message, (response) => {
+      console.log("[OffscreenManager] Received response:", response);
+      console.log(
+        "[OffscreenManager] chrome.runtime.lastError:",
+        chrome.runtime.lastError,
+      );
+
       if (chrome.runtime.lastError) {
-        reject(new Error(chrome.runtime.lastError.message));
+        const error = new Error(chrome.runtime.lastError.message);
+        console.error("[OffscreenManager] Runtime error:", error);
+        reject(error);
       } else if (response && response.success) {
+        console.log("[OffscreenManager] Success response data:", response.data);
         resolve(response.data);
       } else {
-        reject(new Error(response?.error || 'Unknown error'));
+        const error = new Error(response?.error || "Unknown error");
+        console.error("[OffscreenManager] Error response:", error);
+        reject(error);
       }
     });
   });
@@ -99,8 +134,8 @@ async function initPeer(peerId, config, isPrimary, passphrase) {
   console.log("[OffscreenManager] Initializing peer:", peerId);
 
   return await sendToOffscreen({
-    type: 'PEER_INIT',
-    data: { peerId, config, isPrimary, passphrase }
+    type: "PEER_INIT",
+    data: { peerId, config, isPrimary, passphrase },
   });
 }
 
@@ -111,8 +146,8 @@ async function connectToPeer(targetPeerId) {
   console.log("[OffscreenManager] Connecting to peer:", targetPeerId);
 
   return await sendToOffscreen({
-    type: 'PEER_CONNECT',
-    data: { targetPeerId }
+    type: "PEER_CONNECT",
+    data: { targetPeerId },
   });
 }
 
@@ -120,11 +155,14 @@ async function connectToPeer(targetPeerId) {
  * Send data through peer connection in offscreen document
  */
 async function sendPeerData(message) {
-  console.log("[OffscreenManager] Sending peer data:", message.type || 'unknown');
+  console.log(
+    "[OffscreenManager] Sending peer data:",
+    message.type || "unknown",
+  );
 
   return await sendToOffscreen({
-    type: 'PEER_SEND',
-    data: { message }
+    type: "PEER_SEND",
+    data: { message },
   });
 }
 
@@ -136,8 +174,8 @@ async function disconnectPeer() {
 
   try {
     return await sendToOffscreen({
-      type: 'PEER_DISCONNECT',
-      data: {}
+      type: "PEER_DISCONNECT",
+      data: {},
     });
   } catch (error) {
     console.warn("[OffscreenManager] Error disconnecting peer:", error);
@@ -149,13 +187,13 @@ async function disconnectPeer() {
  */
 async function getPeerStatus() {
   return await sendToOffscreen({
-    type: 'PEER_STATUS',
-    data: {}
+    type: "PEER_STATUS",
+    data: {},
   });
 }
 
 // Export functions
-if (typeof module !== 'undefined' && module.exports) {
+if (typeof module !== "undefined" && module.exports) {
   module.exports = {
     ensureOffscreenDocument,
     hasOffscreenDocument,
@@ -165,6 +203,6 @@ if (typeof module !== 'undefined' && module.exports) {
     connectToPeer,
     sendPeerData,
     disconnectPeer,
-    getPeerStatus
+    getPeerStatus,
   };
 }

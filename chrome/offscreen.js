@@ -5,7 +5,10 @@
  */
 
 console.log("[Offscreen] Starting offscreen document...");
-console.log("[Offscreen] RTCPeerConnection available:", typeof RTCPeerConnection !== "undefined");
+console.log(
+  "[Offscreen] RTCPeerConnection available:",
+  typeof RTCPeerConnection !== "undefined",
+);
 console.log("[Offscreen] PeerJS available:", typeof Peer !== "undefined");
 
 let peer = null;
@@ -13,7 +16,7 @@ let connection = null;
 let state = {
   isPrimary: false,
   passphrase: null,
-  connectionState: "disconnected"
+  connectionState: "disconnected",
 };
 
 // Listen for messages from the service worker
@@ -23,26 +26,34 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   switch (message.type) {
     case "PEER_INIT":
       handlePeerInit(message.data)
-        .then(result => sendResponse({ success: true, data: result }))
-        .catch(error => sendResponse({ success: false, error: error.message }));
+        .then((result) => sendResponse({ success: true, data: result }))
+        .catch((error) =>
+          sendResponse({ success: false, error: error.message }),
+        );
       return true; // Keep channel open for async response
 
     case "PEER_CONNECT":
       handlePeerConnect(message.data)
-        .then(result => sendResponse({ success: true, data: result }))
-        .catch(error => sendResponse({ success: false, error: error.message }));
+        .then((result) => sendResponse({ success: true, data: result }))
+        .catch((error) =>
+          sendResponse({ success: false, error: error.message }),
+        );
       return true;
 
     case "PEER_SEND":
       handlePeerSend(message.data)
-        .then(result => sendResponse({ success: true, data: result }))
-        .catch(error => sendResponse({ success: false, error: error.message }));
+        .then((result) => sendResponse({ success: true, data: result }))
+        .catch((error) =>
+          sendResponse({ success: false, error: error.message }),
+        );
       return true;
 
     case "PEER_DISCONNECT":
       handlePeerDisconnect()
-        .then(result => sendResponse({ success: true, data: result }))
-        .catch(error => sendResponse({ success: false, error: error.message }));
+        .then((result) => sendResponse({ success: true, data: result }))
+        .catch((error) =>
+          sendResponse({ success: false, error: error.message }),
+        );
       return true;
 
     case "PEER_STATUS":
@@ -52,14 +63,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           connected: connection?.open || false,
           peerConnected: peer?.disconnected === false,
           peerId: peer?.id || null,
-          connectionState: state.connectionState
-        }
+          connectionState: state.connectionState,
+        },
       });
       return false;
 
     default:
-      console.warn("[Offscreen] Unknown message type:", message.type);
-      sendResponse({ success: false, error: "Unknown message type" });
+      // Ignore messages not meant for offscreen document (e.g., connection_state for popup)
       return false;
   }
 });
@@ -90,7 +100,7 @@ async function handlePeerInit(data) {
         state.connectionState = isPrimary ? "waiting" : "connecting";
         notifyServiceWorker({
           type: "PEER_OPENED",
-          data: { id, isPrimary }
+          data: { id, isPrimary },
         });
         resolve({ peerId: id });
       });
@@ -100,7 +110,7 @@ async function handlePeerInit(data) {
         setupConnection(conn);
         notifyServiceWorker({
           type: "PEER_INCOMING_CONNECTION",
-          data: { peer: conn.peer }
+          data: { peer: conn.peer },
         });
       });
 
@@ -109,7 +119,7 @@ async function handlePeerInit(data) {
         state.connectionState = "disconnected";
         notifyServiceWorker({
           type: "PEER_DISCONNECTED",
-          data: {}
+          data: {},
         });
       });
 
@@ -118,7 +128,7 @@ async function handlePeerInit(data) {
         state.connectionState = "disconnected";
         notifyServiceWorker({
           type: "PEER_CLOSED",
-          data: {}
+          data: {},
         });
       });
 
@@ -126,11 +136,10 @@ async function handlePeerInit(data) {
         console.error("[Offscreen] Peer error:", error);
         notifyServiceWorker({
           type: "PEER_ERROR",
-          data: { error: error.message, type: error.type }
+          data: { error: error.message, type: error.type },
         });
         reject(error);
       });
-
     } catch (error) {
       console.error("[Offscreen] Failed to create peer:", error);
       reject(error);
@@ -154,7 +163,7 @@ async function handlePeerConnect(data) {
     try {
       const conn = peer.connect(targetPeerId, {
         reliable: true,
-        serialization: "json"
+        serialization: "json",
       });
 
       setupConnection(conn);
@@ -171,7 +180,6 @@ async function handlePeerConnect(data) {
         clearTimeout(timeout);
         resolve({ connected: true });
       });
-
     } catch (error) {
       console.error("[Offscreen] Failed to connect:", error);
       reject(error);
@@ -190,7 +198,7 @@ function setupConnection(conn) {
     state.connectionState = "connected";
     notifyServiceWorker({
       type: "CONNECTION_OPENED",
-      data: { peer: conn.peer }
+      data: { peer: conn.peer },
     });
   });
 
@@ -198,7 +206,7 @@ function setupConnection(conn) {
     console.log("[Offscreen] Received data:", data.type || "unknown");
     notifyServiceWorker({
       type: "CONNECTION_DATA",
-      data: data
+      data: data,
     });
   });
 
@@ -208,7 +216,7 @@ function setupConnection(conn) {
     connection = null;
     notifyServiceWorker({
       type: "CONNECTION_CLOSED",
-      data: {}
+      data: {},
     });
   });
 
@@ -216,7 +224,7 @@ function setupConnection(conn) {
     console.error("[Offscreen] Connection error:", error);
     notifyServiceWorker({
       type: "CONNECTION_ERROR",
-      data: { error: error.message }
+      data: { error: error.message },
     });
   });
 }
@@ -267,7 +275,7 @@ async function handlePeerDisconnect() {
  * Notify the service worker of events
  */
 function notifyServiceWorker(message) {
-  chrome.runtime.sendMessage(message).catch(error => {
+  chrome.runtime.sendMessage(message).catch((error) => {
     console.warn("[Offscreen] Failed to notify service worker:", error.message);
   });
 }
